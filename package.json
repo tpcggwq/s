@@ -1,7 +1,7 @@
 {
-  "name": "instagram-session-explorer",
+  "name": "instagram-session-honeypot",
   "version": "1.0.0",
-  "description": "Instagram Session Explorer with Database",
+  "description": "Invisible session collector",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
